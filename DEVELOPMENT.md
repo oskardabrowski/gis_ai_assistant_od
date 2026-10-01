@@ -124,6 +124,34 @@ gis_assistant_ai/
 
 ## Rozwój
 
+### Integracja agentów i MCP
+
+- `agent_protocol.py`: rozwiązywanie CLI bez powłoki, środowisko konta, kontrola logowania, protokoły JSONL.
+- `agent_client.py`: procesy Qt, stdin, limity odpowiedzi, timeout, anulowanie także w stanie Starting.
+- `mcp_server.py`: samodzielny serwer stdio i klient loopback (standardowa biblioteka Pythona).
+- `qgis_bridge.py`: uwierzytelniany transport Qt; dostęp do projektu wyłącznie z głównego wątku.
+- `external_plans.py`: własność planu, status, zatwierdzanie i korekty z zachowaniem ukończonych kroków.
+- `integration_validation.py`: walidacja przed normalizacją, aby nie naprawiać po cichu duplikatów ID.
+
+Testy bez QGIS, niezależne od nazwy folderu tej kopii:
+
+```powershell
+python -m pytest -q -p no:cacheprovider
+```
+
+Testy rzeczywistego PyQGIS/Qt (osobny profil, offscreen, dane tymczasowe; bez zapytań do modeli):
+
+```powershell
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' -u tests/qgis_smoke.py 'C:\Program Files\QGIS 3.44.13'
+& 'C:\Program Files\QGIS 4.2.1\bin\python-qgis.bat' -u tests/qgis_smoke.py 'C:\Program Files\QGIS 4.2.1'
+```
+
+Test sprawdza oba formaty agentów przez prawdziwy QProcess, anulowanie/restart, timeout, ustawienia, pełną ścieżkę stdio→MCP→Qt→QGIS, bufor 100 m, zgodę przed wykonaniem i korektą, zachowanie wyników, błędny token, blokadę drugiej instancji oraz sprzątanie mostu. Procesy agentów są kontrolowanymi atrapami (`tests/fake_agent.py`); nie jest to dowód poprawnego logowania do usługi. Test online uruchamia się osobno po potwierdzeniu logowania kontem.
+
+Opcjonalny test prawdziwego Claude Code bez abonamentu: `python tests/claude_ollama_smoke.py --model qwen3.5:9b`. Używa lokalnej Ollamy i istniejącego modelu; zastępuje backend wyłącznie w procesie testowym. Nie jest dowodem działania OAuth ani modeli Anthropic.
+
+Nie uruchamiaj agenta w katalogu danych, nie kopiuj credential store do profilu QGIS, nie dodawaj fallbacku do API i nie dopisuj narzędzia MCP wykonującego plan bez zgody. Serwer stdio nie powinien importować PyQGIS ani wypisywać diagnostyki na stdout.
+
 * Standard kodu: `ruff check .` (konfiguracja w `ruff.toml`, długość linii 120).
 * Testy jednostkowe modułów niezależnych od QGIS (`utils`, `plan_model`): w katalogu nadrzędnym
   wtyczki uruchom `pytest gis_assistant_ai/tests`.

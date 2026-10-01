@@ -1,5 +1,9 @@
 # GIS Assistant AI
 
+**Integracja Codex / Claude Code:** rozmowa w panelu przez lokalny CLI zalogowany kontem abonamentowym oraz sterowanie QGIS z zewnętrznego agenta przez MCP. Konfiguracja obu wariantów: [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md). Dotychczasowi dostawcy API i Ollama pozostają dostępni.
+
+**Codex / Claude Code integration:** the QGIS panel can use an account-authenticated local CLI; external agents can connect through MCP. Plans and revisions require approval in QGIS.
+
 ## PL
 Wtyczka QGIS z asystentem AI. W panelu wtyczki opisujesz językiem naturalnym, co chcesz zrobić w QGIS (np. „Stwórz bufor o promieniu 100 metrów od szkół w powiecie piaseczyńskim”), a wtyczka wskazuje odpowiednie narzędzie albo przygotowuje plan działań krok po kroku i wykonuje go po kliknięciu „WYKONAJ”.
 
@@ -30,6 +34,8 @@ Aktualna wersja: **0.4.3**. Od wersji 0.4 odpowiedzi AI przesyłane są strumien
 - Krótki skrypt PyQGIS – tylko po włączeniu tej opcji w ustawieniach i zatwierdzeniu kodu
 
 ### Obsługiwani dostawcy modeli AI:
+- Połącz z Codex: oficjalny CLI z aktywnym logowaniem; użycie podlega limitom konta.
+- Połącz z Claude Code: oficjalny CLI zalogowany przez claude.ai; użycie podlega limitom konta.
 - Anthropic Claude – wymagany klucz API z Claude Console
 - OpenAI lub serwer zgodny z API OpenAI – wymagany klucz API
 - Ollama – model uruchamiany lokalnie, dane nie opuszczają komputera, klucz nie jest potrzebny

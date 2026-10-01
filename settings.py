@@ -20,6 +20,7 @@ class Settings:
         "send_samples": False,
         "allow_python": False,  # kod od modelu tylko po świadomym włączeniu (audyt B1)
         "show_details": False,
+        "mcp_enabled": False,
     }
 
     def __init__(self):
@@ -81,6 +82,7 @@ class Settings:
             "provider": p,
             "model": self.model(p),
             "endpoint": self.endpoint(p),
+            "executable": self.value("executable/" + p, "", str),
             "api_key": SecretStore.get(p) if PROVIDERS[p]["needs_key"] else "",
             # temperatury nie wysyłamy do modeli w chmurze – nowsze modele ją odrzucają
             "temperature": OLLAMA_TEMPERATURE if p == "ollama" else None,

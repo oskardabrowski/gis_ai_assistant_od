@@ -14,6 +14,7 @@ from qgis.PyQt.QtNetwork import QNetworkReply, QNetworkRequest
 
 from .utils import redact_key
 from .i18n import tr
+from .agent_protocol import AGENT_PROVIDERS
 
 
 def _extend_qgis_timeout(reply, ms):
@@ -47,12 +48,15 @@ class LLMClient(QObject):
         self._config = None
         self._request_args = None
         self._fixes = set()
+        self._agent = None
 
     @property
     def busy(self):
-        return self._reply is not None
+        return self._reply is not None or (self._agent is not None and self._agent.busy)
 
     def abort(self):
+        if self._agent is not None:
+            self._agent.abort()
         if self._reply is not None:
             self._aborted = True
             self._reply.abort()
@@ -60,8 +64,16 @@ class LLMClient(QObject):
     # ------------------------------------------------------------------ wysyłka
     def request(self, system, messages, config):
         """messages: lista {"role": "user"|"assistant", "content": str}."""
-        if self._reply is not None:
-            self.abort()
+        self.abort()
+        if config["provider"] in AGENT_PROVIDERS:
+            if self._agent is None:
+                from .agent_client import AgentClient
+                self._agent = AgentClient(self)
+                self._agent.finished.connect(self.finished.emit)
+                self._agent.failed.connect(self.failed.emit)
+                self._agent.progress.connect(self.progress.emit)
+            self._agent.request(system, messages, config)
+            return
         self._aborted = False
         self._config = config
         self._request_args = (system, messages)

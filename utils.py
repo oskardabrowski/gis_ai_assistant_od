@@ -32,33 +32,13 @@ def extract_json(text):
 
 def _scan_object(t):
     start = t.find("{")
-    while start != -1:
-        depth, in_str, esc = 0, False, False
-        for i in range(start, len(t)):
-            ch = t[i]
-            if in_str:
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
-                elif ch == '"':
-                    in_str = False
-                continue
-            if ch == '"':
-                in_str = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    try:
-                        obj = json.loads(t[start:i + 1])
-                        if isinstance(obj, dict):
-                            return obj
-                    except ValueError:
-                        break
-                    break
-        start = t.find("{", start + 1)
+    if start != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(t[start:])
+            if isinstance(obj, dict):
+                return obj
+        except ValueError:
+            pass  # Never recover a nested step from a truncated outer plan.
     return None
 
 
@@ -259,7 +239,7 @@ def python_risks(code):
 
 def is_web_url(url):
     """
-    Tylko http(s) – inne schematy (file:, smb:, ms-settings: …) 
+    Tylko http(s) – inne schematy (file:, smb:, ms-settings: …)
     mogą uruchamiać programy (audyt A4).
     """
     return bool(re.match(r"(?i)^https?://[^\s/$.?#][^\s]*$", str(url or "").strip()))

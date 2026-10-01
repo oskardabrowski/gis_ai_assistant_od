@@ -208,4 +208,9 @@ def _hidden(param):
 
 
 def context_json(ctx):
-    return json.dumps(ctx, ensure_ascii=False, indent=1)[:MAX_CONTEXT_CHARS + 4000]
+    text = json.dumps(ctx, ensure_ascii=False, indent=1)
+    if len(text) > MAX_CONTEXT_CHARS + 4000:
+        text = json.dumps(ctx, ensure_ascii=False, separators=(",", ":"))
+    if len(text) > MAX_CONTEXT_CHARS + 4000:
+        raise ValueError("Opis projektu jest zbyt duży. Ogranicz liczbę warstw lub wyłącz przykładowe wartości.")
+    return text

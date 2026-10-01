@@ -21,10 +21,13 @@ from ..constants import (
 from ..i18n import language_label, tr
 from ..context_builder import build_context, context_json, layer_info
 from ..executor import PlanExecutor
+from ..external_plans import ExternalPlans
+from ..integration_validation import checked_plan
+from ..qgis_bridge import QGISBridge
 from ..llm_client import LLMClient
 from ..prompts import SYSTEM_PROMPT, revision_message, user_message
 from ..settings import SecretStore, Settings
-from ..utils import is_web_url, md_to_html, python_risks
+from ..utils import extract_json, is_web_url, md_to_html, python_risks
 from . import icons, render, styles
 from .settings_dialog import SettingsDialog
 from .confirm_dialog import ConfirmDialog
@@ -70,10 +73,13 @@ class GISAssistantAIDock(QgsDockWidget):
         self._pending_query = ""
         self._pending_ctx = ""
         self._plan_note = None
+        self.external = ExternalPlans(self)
 
         self._build_ui()
         self._render_welcome()
         QgsProject.instance().layersAdded.connect(self._on_layers_added)
+        self.bridge = QGISBridge(self)
+        self._configure_bridge()
 
     # ================================================================== budowa UI
     def _build_ui(self):
@@ -430,6 +436,7 @@ class GISAssistantAIDock(QgsDockWidget):
         event.accept()
 
     def cleanup(self):
+        self.bridge.stop()
         try:
             QgsProject.instance().layersAdded.disconnect(self._on_layers_added)
         except (TypeError, RuntimeError):
@@ -466,7 +473,12 @@ class GISAssistantAIDock(QgsDockWidget):
         if cfg is None:
             return
         self._pending_query = query
-        ctx = context_json(build_context(self.iface, self.settings))
+        try:
+            ctx = context_json(build_context(self.iface, self.settings))
+        except ValueError as exc:
+            self._log("error", str(exc))
+            return
+        self.external.clear()
         self._pending_ctx = ctx
         messages = self._history_messages() + [{"role": "user", "content": user_message(query, ctx, language_label())}]
         self._purpose = ("query", query)
@@ -502,7 +514,13 @@ class GISAssistantAIDock(QgsDockWidget):
     def _handle_query_response(self, query, text):
         self._reveal_result()
         try:
-            resp = plan_model.validate(plan_model.parse_response(text))
+            raw = extract_json(text)
+            if raw.get("type") in ("plan", "plan_revision") or raw.get("steps"):
+                raw["type"] = "plan"
+                resp = checked_plan(raw)
+            else:
+                resp = plan_model.normalize(raw)
+            resp = plan_model.validate(resp)
         except Exception as e:  # noqa: BLE001
             self._log("error", tr("Nie udało się odczytać odpowiedzi: %s") % e)
             self.result.setHtml(render.error(self.pal, str(e), text))
@@ -545,6 +563,9 @@ class GISAssistantAIDock(QgsDockWidget):
 
     # ------------------------------------------------------------------ korekta planu
     def _request_revision(self, purpose, idx):
+        if self.external.plan_id:
+            self.external.await_revision(purpose, idx)
+            return
         cfg = self._config_or_prompt()
         steps = self.executor.steps
         if cfg is None or self.response is None:
@@ -564,16 +585,29 @@ class GISAssistantAIDock(QgsDockWidget):
                          step["title"], " i wskazał warstwę „%s” (id: %s)" % (lyr.name(), lyr.id()) if lyr else "")
             extra = ""
             if lyr is not None:
-                extra = "Opis wskazanej warstwy: %s" % context_json(layer_info(
-                    lyr, True, self.settings.value("send_samples", False, bool)))
+                try:
+                    extra = "Opis wskazanej warstwy: %s" % context_json(layer_info(
+                        lyr, True, self.settings.value("send_samples", False, bool)))
+                except ValueError as exc:
+                    self._show_error_panel(idx, str(exc))
+                    return
             status = tr("Dopasowuję dalsze kroki do wczytanych danych…")
         else:
             from_idx = idx
             step = steps[idx]
             reason = "Krok „%s” (id %s) zakończył się błędem: %s" % (step["title"], step["id"], step.get("_error", ""))
-            extra = "Kod nieudanego kroku: %s" % context_json({k: v for k, v in step.items() if not k.startswith("_")})
+            try:
+                extra = "Kod nieudanego kroku: %s" % context_json(
+                    {k: v for k, v in step.items() if not k.startswith("_")})
+            except ValueError as exc:
+                self._show_error_panel(idx, str(exc))
+                return
             status = tr("Analizuję błąd i poprawiam plan…")
-        ctx = context_json(build_context(self.iface, self.settings))
+        try:
+            ctx = context_json(build_context(self.iface, self.settings))
+        except ValueError as exc:
+            self._show_error_panel(idx, str(exc))
+            return
         messages = [
             {"role": "user", "content": user_message(self._last_query, self._plan_ctx, language_label())},
             {"role": "assistant", "content": self._last_raw[:8000]},
@@ -589,10 +623,13 @@ class GISAssistantAIDock(QgsDockWidget):
 
     def _handle_revision(self, purpose, from_idx, text):
         try:
-            rev = plan_model.parse_response(text)
-            taken = [s["id"] for s in self.executor.steps[:from_idx]]
-            steps = plan_model.normalize_steps(rev.get("steps") or [], taken_ids=taken)
-            plan_model.validate({"type": "plan_revision", "steps": steps})
+            rev = extract_json(text)
+            new_steps = rev.get("steps") or []
+            if new_steps:
+                combined = checked_plan({"type": "plan", "steps": self.executor.steps[:from_idx] + new_steps})
+                steps = plan_model.validate(combined)["steps"][from_idx:]
+            else:
+                steps = []
         except Exception as e:  # noqa: BLE001
             self._log("error", tr("Nie udało się odczytać korekty planu: %s") % e)
             if purpose == "replan":
@@ -614,6 +651,8 @@ class GISAssistantAIDock(QgsDockWidget):
 
     # ================================================================== wykonanie
     def _execute(self):
+        if self.external.approve_revision():
+            return
         if not plan_model.executable(self.response) or self.executor.running:
             return
         if any(s.get("_status") not in (None, "pending") for s in self.response["steps"]):
@@ -622,9 +661,13 @@ class GISAssistantAIDock(QgsDockWidget):
             if ans != QMessageBox.StandardButton.Yes:
                 return
         self._set_running(True)
+        if self.external.plan_id:
+            self.external.started = True
+            self.external.cancelled = False
         self.executor.start(self.response)
 
     def _stop(self):
+        self.external.stop()
         self.client.abort()
         self._purpose = None
         self.user_panel.hide()
@@ -654,7 +697,9 @@ class GISAssistantAIDock(QgsDockWidget):
         self._set_running(False)
         self.user_panel.hide()
         self.error_panel.hide()
-        if ok:
+        if ok and any(s.get("_status") != "done" for s in self.response["steps"]):
+            self.status.setText("Plan zakończony częściowo — nie wszystkie kroki wykonano.")
+        elif ok:
             self.status.setText(tr("✔ Plan wykonany."))
             self.iface.messageBar().pushMessage(PLUGIN_NAME, tr("Plan „%s” został wykonany.") % (
                 self.response.get("title") or ""), level=Qgis.MessageLevel.Success, duration=5)
@@ -861,6 +906,7 @@ class GISAssistantAIDock(QgsDockWidget):
     def _open_settings(self):
         dlg = SettingsDialog(self.settings, self)
         if dlg.exec():
+            self._configure_bridge()
             where = dlg.property("key_storage_info")
             if where:
                 self.iface.messageBar().pushMessage(PLUGIN_NAME, tr("Klucz API zapisany: %s.") % where,
@@ -871,6 +917,10 @@ class GISAssistantAIDock(QgsDockWidget):
     def _new_conversation(self):
         if self.executor.running:
             return
+        self.client.abort()
+        self._purpose = None
+        self._set_busy(False)
+        self.external.clear()
         self.history.clear()
         self.response = None
         self.exec_btn.setEnabled(False)
@@ -881,11 +931,21 @@ class GISAssistantAIDock(QgsDockWidget):
         self.prompt.setFocus()
 
     # ================================================================== pomocnicze
+    def _configure_bridge(self):
+        if self.settings.value("mcp_enabled", False, bool):
+            try:
+                self.bridge.start()
+            except OSError:
+                self._log("error", "Nie można uruchomić mostu MCP. Sprawdź uprawnienia profilu QGIS.")
+        else:
+            self.bridge.stop()
+
     def _set_busy(self, busy, text=""):
         self.busy.setRange(0, 0 if busy else 1)
         if not busy:
             self.busy.setValue(0)
         self.ask_btn.setEnabled(not busy and not self.executor.running)
+        self.stop_btn.setEnabled(busy or self.executor.running)
         if text or busy:
             self.status.setText(text)
         self._busy_text = text if busy else ""

@@ -27,6 +27,16 @@ FOOTER_LOGO_URL = "https://envirosolutions.pl/"
 
 # Dostawcy modeli językowych. Adresy i modele można zmienić w ustawieniach.
 PROVIDERS = {
+    "codex": {
+        "label": N_("Połącz z Codex"),
+        "url": "", "models": [""], "needs_key": False,
+        "models_url": "https://learn.chatgpt.com/docs/models",
+    },
+    "claude_code": {
+        "label": N_("Połącz z Claude Code"),
+        "url": "", "models": ["", "sonnet", "opus", "haiku"], "needs_key": False,
+        "models_url": "https://code.claude.com/docs/en/model-config",
+    },
     "anthropic": {
         "label": N_("Anthropic Claude"),
         "url": "https://api.anthropic.com/v1/messages",
@@ -76,5 +86,5 @@ EXAMPLE_PROMPTS = [
 
 # Parametry zapytań – dobrane na stałe, bez konfiguracji po stronie użytkownika.
 LLM_MAX_TOKENS = 8192          # wystarcza na rozbudowany plan; odpowiedź ucięta jest wykrywana
-LLM_TIMEOUT_S = {"anthropic": 180, "openai": 180, "ollama": 300}  # modele lokalne bywają wolniejsze
+LLM_TIMEOUT_S = {"anthropic": 180, "openai": 180, "ollama": 300, "codex": 300, "claude_code": 300}
 OLLAMA_TEMPERATURE = 0.2       # modele lokalne trzymają format JSON stabilniej przy niskiej temperaturze
